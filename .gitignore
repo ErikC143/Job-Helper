@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.DS_Store
+.pytest_cache/
+
+# Personal job search data stays local
+data/*.db
+data/*.csv
+!data/.gitkeep
+
+# Resumes and postings are personal
+inputs/*
+!inputs/.gitkeep
