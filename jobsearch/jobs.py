@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from . import comparison
+from . import comparison, resume
 
 
 @dataclass
@@ -74,11 +74,16 @@ def _run(job: Job, resume_text: str, on_success) -> None:
         else:
             job.answer += text
 
-    auth = _auth_executor.submit(comparison.check_work_authorization, resume_text, job.posting_text)
+    # U.S. citizens can't be blocked by sponsorship rules, so they skip the check and its cost.
+    auth = (
+        None
+        if resume.is_us_citizen(resume_text)
+        else _auth_executor.submit(comparison.check_work_authorization, resume_text, job.posting_text)
+    )
     try:
         result = comparison.compare(resume_text, job.posting_text, on_event=on_event)
         try:
-            work_authorization = auth.result()
+            work_authorization = auth.result() if auth else None
         except Exception as e:
             print(f"Work authorization check failed: {comparison.error_message(e) or e!r}")
             work_authorization = None

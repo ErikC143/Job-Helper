@@ -13,7 +13,14 @@ from jobsearch.comparison import (
     check_work_authorization,
     explain_requirements,
 )
-from jobsearch.ui import call_claude, posting_section, resume_section, show_job_errors, watch_jobs
+from jobsearch.ui import (
+    call_claude,
+    chat_sidebar,
+    posting_section,
+    resume_section,
+    show_job_errors,
+    watch_jobs,
+)
 
 load_dotenv()
 
@@ -31,10 +38,16 @@ STANCE_LABELS = {
 
 st.set_page_config(page_title="Resume Match", page_icon="📄", layout="wide")
 st.title("📄 Resume Match")
+chat_sidebar()
 st.caption("Upload your resume and a job posting to see how well they match.")
 
 
 # ---------- Report rendering ----------
+
+def plain(text: str) -> str:
+    """Escape text for st.markdown, where "$80k-$100k" would otherwise render as math."""
+    return text.replace("$", "\\$")
+
 
 def bullets(items: list[str], empty: str) -> None:
     if items:
@@ -45,7 +58,7 @@ def bullets(items: list[str], empty: str) -> None:
 
 def requirement_detail(req: RequirementMatch, meaning: RequirementExplanation | None) -> None:
     with st.container(border=True):
-        st.markdown(f"**{req.requirement}**")
+        st.markdown(f"**{plain(req.requirement)}**")
         st.progress(req.match_percent / 100, text=f"{req.match_percent}% match")
         overview, what, talking, strengths, weaknesses = st.tabs(
             ["Overview", "What it means", "Talking points", "Strengths", "Weaknesses"]
@@ -85,29 +98,31 @@ def category_section(
 
     with st.expander(f"{label} · {avg:.0f}% average · {len(reqs)} item{'s' if len(reqs) != 1 else ''}", expanded=category == "minimum"):
         st.progress(avg / 100, text=f"Total match: {avg:.0f}%")
-        st.caption("Click a row to see its breakdown.")
+        st.caption("Click **Details** on a requirement to see its breakdown.")
 
-        table = pd.DataFrame({
-            "Requirement": [r.requirement for r in reqs],
-            "Match": [r.match_percent for r in reqs],
-        })
-        event = st.dataframe(
-            table,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            selection_default={"selection": {"rows": [0]}},
-            key=f"table_{report_id}_{category}",
-            column_config={
-                "Requirement": st.column_config.TextColumn(width="large"),
-                "Match": st.column_config.ProgressColumn(
-                    min_value=0, max_value=100, format="%d%%", width="medium"
-                ),
-            },
-        )
-        rows = event.selection.rows
-        if rows:
-            requirement_detail(reqs[rows[0]], meanings.get(indexes[rows[0]]))
+        # Rows instead of st.dataframe, which cuts long text off at the column edge.
+        open_key = f"open_{report_id}_{category}"
+        st.session_state.setdefault(open_key, 0)  # the first requirement starts open
+
+        def toggle(row: int) -> None:
+            st.session_state[open_key] = None if st.session_state[open_key] == row else row
+
+        for row, req in enumerate(reqs):
+            is_open = st.session_state[open_key] == row
+            with st.container(border=True):
+                text, match, button = st.columns([6, 2, 1], vertical_alignment="center")
+                text.markdown(plain(req.requirement))
+                match.progress(req.match_percent / 100, text=f"{req.match_percent}%")
+                button.button(
+                    "Hide" if is_open else "Details",
+                    key=f"{open_key}_{row}",
+                    type="primary" if is_open else "secondary",
+                    on_click=toggle,
+                    args=(row,),
+                    width="stretch",
+                )
+            if is_open:
+                requirement_detail(req, meanings.get(indexes[row]))
 
 
 def explain_section(report: reports.Report, posting_text: str | None) -> None:
@@ -138,10 +153,11 @@ def confidence_label(confidence: int) -> tuple[str, str]:
 def h1b_table(auth: WorkAuthorization) -> None:
     matched = set(auth.assessment.matched_employers if auth.assessment else [])
     rows = sorted(auth.h1b_matches, key=lambda m: m.employer not in matched)  # matches first
-    st.dataframe(
+    # A static table, so long employer names and locations wrap instead of being cut off.
+    st.table(
         pd.DataFrame({
             "Employer": [m.employer for m in rows],
-            "Same company": [m.employer in matched for m in rows],
+            "Same company": ["✓" if m.employer in matched else "" for m in rows],
             "Locations": [", ".join(m.locations[:3]) + (" …" if len(m.locations) > 3 else "") for m in rows],
             "Years": [", ".join(map(str, sorted(m.years))) for m in rows],
             "Initial approvals": [m.initial_approvals for m in rows],
@@ -149,7 +165,6 @@ def h1b_table(auth: WorkAuthorization) -> None:
             "Denials": [m.initial_denials + m.continuing_denials for m in rows],
         }),
         hide_index=True,
-        column_config={"Employer": st.column_config.TextColumn(width="large")},
     )
     st.caption(
         "**Initial** approvals are new H-1B jobs, such as a student moving from OPT to H-1B. "
@@ -198,12 +213,19 @@ def work_authorization_section(report: reports.Report, inputs: tuple[str, str] |
     auth = report.work_authorization
     title = "🛂 Work authorization" + (f" · {auth.confidence}% confidence" if auth else "")
     with st.expander(title, expanded=bool(auth and auth.posting.status_stated)):
+        citizen = resume.is_us_citizen(resume.load())
         if auth:
             render_work_authorization(auth)
+        elif citizen:
+            st.caption(
+                "Skipped: your work authorization is set to U.S. citizen, so comparisons don't run this check. "
+                "Use **Check anyway** if this posting mentions a security clearance or export control (ITAR)."
+            )
         else:
             st.caption("This report doesn't have a work authorization check yet.")
         if inputs:
-            if st.button("Check again" if auth else "Check work authorization", key=f"auth_{report.id}"):
+            label = "Check again" if auth else "Check anyway" if citizen else "Check work authorization"
+            if st.button(label, key=f"auth_{report.id}"):
                 with st.spinner("Checking the posting and USCIS H-1B data..."):
                     auth = call_claude(check_work_authorization, *inputs)
                 reports.save_work_authorization(report, auth)

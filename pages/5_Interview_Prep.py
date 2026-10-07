@@ -4,11 +4,19 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from jobsearch import comparison, interview, jobs, reports, resume
-from jobsearch.ui import INTERVIEW_SECTIONS, posting_section, resume_section, show_job_errors, watch_jobs
+from jobsearch.ui import (
+    chat_sidebar,
+    INTERVIEW_SECTIONS,
+    posting_section,
+    resume_section,
+    show_job_errors,
+    watch_jobs,
+)
 
 load_dotenv()
 st.set_page_config(page_title="Interview Prep", page_icon="🎤", layout="wide")
 st.title("🎤 Interview Prep")
+chat_sidebar()
 st.caption(
     "Choose a saved job posting or add a new one. Its resume comparison is used to build an "
     "interview plan tailored to you and the role."

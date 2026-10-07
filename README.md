@@ -57,6 +57,20 @@ costs a few cents. Interview plans and improvement plans cost a bit more because
 longer. Saved results are reused rather than regenerated, and you can set a monthly spend limit
 in the Claude Console.
 
+### Using your Claude subscription instead (personal use)
+
+If you have a Claude Pro or Max plan and [Claude Code](https://claude.com/claude-code) installed
+and signed in, you can send every request through it instead of the API. Requests then count
+against your plan's usage limits rather than being billed to an API key. Add this line to `.env`:
+
+```
+CLAUDE_BACKEND=cli
+```
+
+The app runs `claude -p` with no tools, so Claude can only answer, not touch your files, and
+leaves `ANTHROPIC_API_KEY` out of its environment so the key isn't billed. This is meant for
+your own copy of the app. Running several comparisons at once uses your plan's limits quickly.
+
 ## Your data
 
 Everything is stored in the project folder, and these folders are git-ignored so they're never
@@ -93,6 +107,7 @@ pages/
   6_Generate_Report.py     Printable PDF reports
 jobsearch/
   comparison.py            Claude prompts and output schemas; command-line entry point
+  llm.py                   Sends requests through the Claude API or the Claude Code CLI
   interview.py             Interview plan prompt, schema, and storage
   reports.py, plans.py     Saving and loading reports and improvement plans
   resume.py                The saved resume and candidate notes

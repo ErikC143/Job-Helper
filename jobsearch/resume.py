@@ -24,8 +24,9 @@ RESUME_TXT = INPUTS_DIR / "resume.txt"
 LEGACY_PDF_DIR = INPUTS_DIR / "resume"
 NOTES_HEADER = "=== CANDIDATE NOTES ==="
 WORK_AUTH_PREFIX = "Work authorization: "
+US_CITIZEN = "U.S. citizen"
 WORK_AUTHORIZATIONS = [
-    "U.S. citizen",
+    US_CITIZEN,
     "U.S. permanent resident (green card)",
     "F-1 student visa (CPT / OPT / STEM OPT)",
     "J-1 exchange visitor",
@@ -66,6 +67,11 @@ def split_notes(text: str) -> tuple[str, str, str]:
     if first.startswith(WORK_AUTH_PREFIX):
         return body, first.removeprefix(WORK_AUTH_PREFIX).strip(), rest.strip()
     return body, "", notes.strip()
+
+
+def is_us_citizen(text: str) -> bool:
+    """True when the user picked U.S. citizen as their work authorization."""
+    return split_notes(text)[1] == US_CITIZEN
 
 
 def save_notes(notes: str | None = None, work_authorization: str | None = None) -> None:

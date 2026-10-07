@@ -5,10 +5,12 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from jobsearch import db, interview, pdf_report, plans, reports, resume
+from jobsearch.ui import chat_sidebar
 
 load_dotenv()
 st.set_page_config(page_title="Generate Report", page_icon="🖨️", layout="wide")
 st.title("🖨️ Generate Report")
+chat_sidebar()
 st.caption(
     "Bundle what you've already generated into a printable PDF for interview prep. "
     "Nothing here calls Claude, so it's instant and free."

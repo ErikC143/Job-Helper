@@ -11,7 +11,7 @@ from pydantic_core import from_json
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from . import db, jobs, reports, resume
+from . import chat, db, jobs, reports, resume
 from .comparison import error_message
 
 
@@ -71,6 +71,7 @@ def work_authorization_picker(key: str, text: str) -> None:
         key=widget_key,
         on_change=lambda: resume.save_notes(work_authorization=st.session_state[widget_key] or ""),
         help="Saved with your resume, so every comparison and work authorization check uses it. "
+        "With U.S. citizen picked, comparisons skip the work authorization check. "
         "Add details like your graduation date or OPT start under Candidate notes.",
     )
 
@@ -198,6 +199,29 @@ def clear_draft() -> None:
     POSTING_TEXT.unlink(missing_ok=True)
 
 
+def normalize_link(link: str) -> str:
+    """Make a pasted link clickable: 'acme.com/jobs/1' becomes 'https://acme.com/jobs/1'."""
+    link = link.strip()
+    if link and "://" not in link:
+        link = "https://" + link
+    return link
+
+
+def link_editor(posting_id: int, url: str) -> None:
+    """Show a saved posting's link, with a field to add or change it. Saves as soon as it changes."""
+    key = f"posting_link_{posting_id}"
+
+    def save() -> None:
+        st.session_state[key] = normalize_link(st.session_state[key])
+        db.update_posting_url(posting_id, st.session_state[key])
+
+    st.session_state.setdefault(key, url)
+    c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
+    c1.text_input("Link", key=key, placeholder="https://...", on_change=save)
+    if url:
+        c2.link_button("Open ↗", url)
+
+
 def pick_posting(posting_id: int) -> None:
     # The picker's value can't change after it's drawn, so it's applied on the next run.
     st.session_state["posting_pick_next"] = posting_id
@@ -228,6 +252,7 @@ def posting_section(resume_text: str) -> tuple[str, str]:
             db.delete_posting(pick)
             pick_posting(NEW_POSTING)
             st.rerun()
+        link_editor(pick, row["url"])
         with st.expander("Posting text"):
             st.text(row["body"])
         return row["body"], labels[pick]
@@ -242,9 +267,10 @@ def posting_section(resume_text: str) -> tuple[str, str]:
             c1, c2 = st.columns(2)
             title = c1.text_input("Job title", value=report.job_title if report else "")
             company = c2.text_input("Company", value=report.company if report else "")
+            link = st.text_input("Link", placeholder="https://... (optional)")
             if st.form_submit_button("Save posting"):
                 if title.strip():
-                    pick_posting(db.add_posting(title.strip(), company.strip(), posting_text))
+                    pick_posting(db.add_posting(title.strip(), company.strip(), posting_text, normalize_link(link)))
                     clear_draft()
                     st.rerun()
                 st.warning("Enter a job title to save the posting.")
@@ -361,3 +387,52 @@ def show_job_errors(prefix: str) -> None:
             if c2.button("Dismiss", key=f"dismiss_{job.key}"):
                 jobs.clear(job.key)
                 st.rerun()
+
+
+# ---------- Chat ----------
+
+def chat_sidebar() -> None:
+    """A chat with Claude at the top of the sidebar. Every page calls this, so it's always available."""
+    with st.sidebar:
+        _chat_panel()
+        st.divider()
+
+
+@st.fragment
+def _chat_panel() -> None:
+    # A fragment, so sending a message reruns only the chat, not the page behind it.
+    history = chat.load_history()
+    with st.expander("💬 Chat with Claude", expanded=bool(history)):
+        context, described = chat.build_context()
+        st.caption(f"Claude can see {described}. The conversation is saved and shared by every page.")
+        box = st.container(height=420)
+        with box:
+            if not history:
+                st.caption(
+                    "Ask about your resume, postings, or results, like *Which posting am I strongest for?* "
+                    "or *Rewrite my summary for the Acme role*. Or ask about anything else."
+                )
+            for message in history:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+        prompt = st.chat_input("Ask Claude anything", key="chat_input")
+        if st.button("Clear chat", key="chat_clear", disabled=not history):
+            chat.clear_history()
+            st.rerun()
+
+        if prompt:
+            history.append({"role": "user", "content": prompt})
+            with box:
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                with st.chat_message("assistant"):
+                    try:
+                        reply = st.write_stream(chat.stream_reply(history, context))
+                    except Exception as e:
+                        if (message := error_message(e)) is None:
+                            raise
+                        st.error(message)
+                        return  # the message isn't saved, so the user can send it again
+            history.append({"role": "assistant", "content": reply})
+            chat.save_history(history)

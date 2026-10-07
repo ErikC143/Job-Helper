@@ -6,11 +6,12 @@ from dotenv import load_dotenv
 
 from jobsearch import plans, reports
 from jobsearch.comparison import Action, SkillToImprove, improvement_plan
-from jobsearch.ui import call_claude, resume_input
+from jobsearch.ui import call_claude, chat_sidebar, resume_input
 
 load_dotenv()
 st.set_page_config(page_title="Improvement Plan", page_icon="📈", layout="wide")
 st.title("📈 Improvement Plan")
+chat_sidebar()
 st.caption("Turn your resume match results into a ranked to-do list of skills to work on.")
 
 GAP_LABELS = {

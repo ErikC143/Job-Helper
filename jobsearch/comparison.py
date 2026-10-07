@@ -1,14 +1,14 @@
-"""Compare a resume against a job posting using the Claude API.
+"""Compare a resume against a job posting with Claude.
 
 Usage:
     python -m jobsearch.comparison resume.txt posting.txt [--json]
 
-Requires ANTHROPIC_API_KEY in the environment or in a .env file at the project root.
+Uses the Claude API with ANTHROPIC_API_KEY, or the Claude Code CLI signed in to your Claude
+account when CLAUDE_BACKEND=cli (see jobsearch/llm.py). Both can be set in .env.
 """
 
 import argparse
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -16,13 +16,13 @@ import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from . import h1b
+from . import h1b, llm
 
 MODEL = "claude-sonnet-5-5"
 
 # How much Claude reasons before answering, per task. Higher effort is slower and uses more
 # tokens, so it's spent where judgment matters most.
-EFFORT: dict[str, Literal["low", "medium", "high", "xhigh", "max"]] = {
+EFFORT: dict[str, llm.Effort] = {
     "compare": "low",  # matching resume evidence to each requirement
     "explain": "low",  # plain-English definitions
     "interview": "low",  # long-form writing grounded in the comparison
@@ -269,9 +269,7 @@ class WorkAuthorization(BaseModel):
         return (self.assessment or self.posting).considerations
 
 
-# Called with ("thinking", text) for each reasoning-summary chunk and ("text", text)
-# for each chunk of the JSON answer, as they stream in.
-OnEvent = Callable[[Literal["thinking", "text"], str], None]
+OnEvent = llm.OnEvent
 
 
 def _parse(
@@ -282,37 +280,12 @@ def _parse(
     on_event: OnEvent | None = None,
     max_tokens: int = 16000,
     *,
-    effort: Literal["low", "medium", "high", "xhigh", "max"],
+    effort: llm.Effort,
 ):
-    client = client or anthropic.Anthropic()
-    with client.beta.messages.stream(
-        model=MODEL,
-        max_tokens=max_tokens,
-        output_config={"effort": effort},
-        # Summarized thinking lets the UI show what Claude is reasoning about.
-        thinking={"type": "adaptive", "display": "summarized"},
-        # On a safety decline, the API retries the request on a fallback model.
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        system=system,
-        messages=[{"role": "user", "content": content}],
-        output_format=output_format,
-    ) as stream:
-        for event in stream:
-            if on_event and event.type == "content_block_delta":
-                if event.delta.type == "thinking_delta":
-                    on_event("thinking", event.delta.thinking)
-                elif event.delta.type == "text_delta":
-                    on_event("text", event.delta.text)
-        response = stream.get_final_message()
-
-    if response.stop_reason == "refusal":
-        raise RuntimeError("Claude declined to process this request.")
-    if response.stop_reason == "max_tokens":
-        raise RuntimeError("Response was cut off. Try shorter inputs or raise max_tokens.")
-    if response.parsed_output is None:
-        raise RuntimeError("Claude did not return a valid result.")
-    return response.parsed_output
+    return llm.parse(
+        system, content, output_format,
+        model=MODEL, effort=effort, on_event=on_event, max_tokens=max_tokens, client=client,
+    )
 
 
 def compare(

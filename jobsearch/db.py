@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS postings (
     title TEXT NOT NULL,
     company TEXT DEFAULT '',
     body TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    url TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -36,10 +37,18 @@ def connect():
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.executescript(SCHEMA)
+        _add_missing_columns(conn)
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Upgrade databases created by older versions of the app."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(postings)")}
+    if "url" not in columns:
+        conn.execute("ALTER TABLE postings ADD COLUMN url TEXT NOT NULL DEFAULT ''")
 
 
 def add_application(app: Application) -> int:
@@ -67,12 +76,17 @@ def delete_application(app_id: int) -> None:
         conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
 
 
-def add_posting(title: str, company: str, body: str) -> int:
+def add_posting(title: str, company: str, body: str, url: str = "") -> int:
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO postings (title, company, body) VALUES (?, ?, ?)", (title, company, body)
+            "INSERT INTO postings (title, company, body, url) VALUES (?, ?, ?, ?)", (title, company, body, url)
         )
         return cur.lastrowid
+
+
+def update_posting_url(posting_id: int, url: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE postings SET url = ? WHERE id = ?", (url, posting_id))
 
 
 def list_postings() -> pd.DataFrame:
